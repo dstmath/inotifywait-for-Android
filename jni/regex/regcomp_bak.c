@@ -33,10 +33,10 @@ static reg_errcode_t create_initial_state (re_dfa_t *dfa);
 static void optimize_utf8 (re_dfa_t *dfa);
 #endif
 static reg_errcode_t analyze (regex_t *preg);
-static reg_errcode_t reg_preorder (bin_tree_t *root,
+static reg_errcode_t preorder (bin_tree_t *root,
 			       reg_errcode_t (fn (void *, bin_tree_t *)),
 			       void *extra);
-static reg_errcode_t reg_postorder (bin_tree_t *root,
+static reg_errcode_t postorder (bin_tree_t *root,
 				reg_errcode_t (fn (void *, bin_tree_t *)),
 				void *extra);
 static reg_errcode_t optimize_subexps (void *extra, bin_tree_t *node);
@@ -1128,7 +1128,7 @@ analyze (regex_t *preg)
       int i;
       for (i = 0; i < preg->re_nsub; i++)
 	dfa->subexp_map[i] = i;
-      reg_preorder (dfa->str_tree, optimize_subexps, dfa);
+      preorder (dfa->str_tree, optimize_subexps, dfa);
       for (i = 0; i < preg->re_nsub; i++)
 	if (dfa->subexp_map[i] != i)
 	  break;
@@ -1139,14 +1139,14 @@ analyze (regex_t *preg)
 	}
     }
 
-  ret = reg_postorder (dfa->str_tree, lower_subexps, preg);
+  ret = postorder (dfa->str_tree, lower_subexps, preg);
   if (BE (ret != REG_NOERROR, 0))
     return ret;
-  ret = reg_postorder (dfa->str_tree, calc_first, dfa);
+  ret = postorder (dfa->str_tree, calc_first, dfa);
   if (BE (ret != REG_NOERROR, 0))
     return ret;
-  reg_preorder (dfa->str_tree, calc_next, dfa);
-  ret = reg_preorder (dfa->str_tree, link_nfa_nodes, dfa);
+  preorder (dfa->str_tree, calc_next, dfa);
+  ret = preorder (dfa->str_tree, link_nfa_nodes, dfa);
   if (BE (ret != REG_NOERROR, 0))
     return ret;
   ret = calc_eclosure (dfa);
@@ -1171,7 +1171,7 @@ analyze (regex_t *preg)
    implement parse tree visits.  Instead, we use parent pointers and
    some hairy code in these two functions.  */
 static reg_errcode_t
-reg_postorder (bin_tree_t *root, reg_errcode_t (fn (void *, bin_tree_t *)),
+postorder (bin_tree_t *root, reg_errcode_t (fn (void *, bin_tree_t *)),
 	   void *extra)
 {
   bin_tree_t *node, *prev;
@@ -1203,7 +1203,7 @@ reg_postorder (bin_tree_t *root, reg_errcode_t (fn (void *, bin_tree_t *)),
 }
 
 static reg_errcode_t
-reg_preorder (bin_tree_t *root, reg_errcode_t (fn (void *, bin_tree_t *)),
+preorder (bin_tree_t *root, reg_errcode_t (fn (void *, bin_tree_t *)),
 	  void *extra)
 {
   bin_tree_t *node;
@@ -2155,7 +2155,7 @@ parse_branch (re_string_t *regexp, regex_t *preg, re_token_t *token,
       if (BE (*err != REG_NOERROR && exp == NULL, 0))
 	{
 	  if (tree != NULL)
-	    reg_postorder (tree, free_tree, NULL);
+	    postorder (tree, free_tree, NULL);
 	  return NULL;
 	}
       if (tree != NULL && exp != NULL)
@@ -2163,8 +2163,8 @@ parse_branch (re_string_t *regexp, regex_t *preg, re_token_t *token,
 	  bin_tree_t *newtree = create_tree (dfa, tree, exp, CONCAT);
 	  if (newtree == NULL)
 	    {
-	      reg_postorder (exp, free_tree, NULL);
-	      reg_postorder (tree, free_tree, NULL);
+	      postorder (exp, free_tree, NULL);
+	      postorder (tree, free_tree, NULL);
 	      *err = REG_ESPACE;
 	      return NULL;
 	    }
@@ -2419,7 +2419,7 @@ parse_sub_exp (re_string_t *regexp, regex_t *preg, re_token_t *token,
       if (BE (*err == REG_NOERROR && token->type != OP_CLOSE_SUBEXP, 0))
 	{
 	  if (tree != NULL)
-	    reg_postorder (tree, free_tree, NULL);
+	    postorder (tree, free_tree, NULL);
 	  *err = REG_EPAREN;
 	}
       if (BE (*err != REG_NOERROR, 0))
@@ -2511,7 +2511,7 @@ parse_dup_op (bin_tree_t *elem, re_string_t *regexp, re_dfa_t *dfa,
     return NULL;
   if (BE (start == 0 && end == 0, 0))
     {
-      reg_postorder (elem, free_tree, NULL);
+      postorder (elem, free_tree, NULL);
       return NULL;
     }
 
@@ -2538,7 +2538,7 @@ parse_dup_op (bin_tree_t *elem, re_string_t *regexp, re_dfa_t *dfa,
     old_tree = NULL;
 
   if (elem->token.type == SUBEXP)
-    reg_postorder (elem, mark_opt_subexp, (void *) (long) elem->token.opr.idx);
+    postorder (elem, mark_opt_subexp, (void *) (long) elem->token.opr.idx);
 
   tree = create_tree (dfa, elem, NULL, (end == -1 ? OP_DUP_ASTERISK : OP_ALT));
   if (BE (tree == NULL, 0))

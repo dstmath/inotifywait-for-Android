@@ -1,5 +1,5 @@
 // FIXME this is cheating!  Make this use only the public API.
-#include "../libinotifytools/src/inotifytools_p.h"
+#include "libinotifytools/inotifytools_p.h"
 #include "../config.h"
 #include "common.h"
 
