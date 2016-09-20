@@ -68,4 +68,4 @@ CLOSE_NOWRITE,CLOSE:------/system/lib/hw/gralloc.msm8974.so Mon-Aug-29-22:08:35
 更多用法可以用 -h来查看更多的选项。
 
 ## 0x04 参考链接
-* [https://github.com/rvoicilas/inotify-tools/wiki](1)
+* [https://github.com/rvoicilas/inotify-tools/wiki](https://github.com/rvoicilas/inotify-tools/wiki)
