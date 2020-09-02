@@ -19,6 +19,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <errno.h>
 #include <sys/select.h>
@@ -149,8 +150,10 @@ static int error = 0;
 static int init = 0;
 static char* timefmt = 0;
 static regex_t* regex = 0;
+/* 0: --exclude[i], 1: --include[i] */
+static int invert_regexp = 0;
 
-int isdir( char const * path );
+static int isdir( char const * path );
 void record_stats( struct inotify_event const * event );
 int onestr_to_event(char const * event);
 
@@ -193,8 +196,8 @@ int onestr_to_event(char const * event);
  *
  * @param  mesg  A human-readable error message shown if assertion fails.
  */
-void _niceassert( long cond, int line, char const * file, char const * condstr,
-                  char const * mesg ) {
+static void _niceassert( long cond, int line, char const * file,
+                  char const * condstr, char const * mesg ) {
 	if ( cond ) return;
 
 	if ( mesg ) {
@@ -285,7 +288,7 @@ int inotifytools_initialize() {
 	// Try to initialise inotify
 	inotify_fd = inotify_init();
 	if (inotify_fd < 0)	{
-		error = inotify_fd;
+		error = errno;
 		return 0;
 	}
 
@@ -370,18 +373,23 @@ void empty_stats(const void *nodep,
 /**
  * @internal
  */
-void replace_filename(const void *nodep,
-                      const VISIT which,
-                      const int depth, void *arg) {
+struct replace_filename_data {
+    char const *old_name;
+    char const *new_name;
+    size_t old_len;
+};
+
+/**
+ * @internal
+ */
+void replace_filename(const void *nodep, const VISIT which, const int depth,
+                      const struct replace_filename_data *data) {
     if (which != endorder && which != leaf) return;
 	watch *w = (watch*)nodep;
-	char *old_name = ((char**)arg)[0];
-	char *new_name = ((char**)arg)[1];
-	int old_len = *((int*)&((char**)arg)[2]);
 	char *name;
-	if ( 0 == strncmp( old_name, w->filename, old_len ) ) {
-		nasprintf( &name, "%s%s", new_name, &(w->filename[old_len]) );
-		if (!strcmp( w->filename, new_name )) {
+	if ( 0 == strncmp( data->old_name, w->filename, data->old_len ) ) {
+		nasprintf( &name, "%s%s", data->new_name, &(w->filename[data->old_len]) );
+		if (!strcmp( w->filename, data->new_name )) {
 			free(name);
 		} else {
 			rbdelete(w, tree_filename);
@@ -476,8 +484,9 @@ int inotifytools_str_to_event_sep(char const * event, char sep) {
 
 	int ret, ret1, len;
 	char * event1, * event2;
-	char eventstr[4096];
-	ret = 0;
+        static const size_t eventstr_size = 4096;
+        char eventstr[eventstr_size];
+        ret = 0;
 
 	if ( !event || !event[0] ) return 0;
 
@@ -486,14 +495,22 @@ int inotifytools_str_to_event_sep(char const * event, char sep) {
 	while ( event1 && event1[0] ) {
 		if ( event2 ) {
 			len = event2 - event1;
-			niceassert( len < 4096, "malformed event string (very long)" );
-		}
+                        niceassert(len < eventstr_size,
+                                   "malformed event string (very long)");
+                }
 		else {
 			len = strlen(event1);
 		}
-		if ( len > 4095 ) len = 4095;
-		strncpy( eventstr, event1, len );
-		eventstr[len] = 0;
+                if (len > eventstr_size - 1)
+                    len = eventstr_size - 1;
+
+                if (event2 || len == eventstr_size - 1) {
+                    strncpy(eventstr, event1, len);
+                } else {
+                    strcpy(eventstr, event1);
+                }
+
+                eventstr[len] = 0;
 
 		ret1 = onestr_to_event( eventstr );
 		if ( 0 == ret1 || -1 == ret1 ) {
@@ -859,11 +876,11 @@ void inotifytools_set_filename_by_filename( char const * oldname,
 void inotifytools_replace_filename( char const * oldname,
                                     char const * newname ) {
 	if ( !oldname || !newname ) return;
-	char *names[2+sizeof(int)/sizeof(char*)];
-	names[0] = (char*)oldname;
-	names[1] = (char*)newname;
-	*((int*)&names[2]) = strlen(oldname);
-	rbwalk(tree_filename, replace_filename, (void*)names);
+	struct replace_filename_data data;
+	data.old_name = oldname;
+	data.new_name = newname;
+	data.old_len = strlen(oldname);
+        rbwalk(tree_filename, (void *)replace_filename, (void *)&data);
 }
 
 /**
@@ -892,6 +909,7 @@ watch *create_watch(int wd, char *filename) {
 	w->filename = strdup(filename);
 	rbsearch(w, tree_wd);
 	rbsearch(w, tree_filename);
+    return NULL;
 }
 
 /**
@@ -1018,8 +1036,8 @@ int inotifytools_watch_files( char const * filenames[], int events ) {
  * be used.
  *
  * @param timeout maximum amount of time, in seconds, to wait for an event.
- *                If @a timeout is 0, the function is non-blocking.  If
- *                @a timeout is negative, the function will block until an
+ *                If @a timeout is non-negative, the function is non-blocking.
+ *                If @a timeout is negative, the function will block until an
  *                event occurs.
  *
  * @return pointer to an inotify event, or NULL if function timed out before
@@ -1037,7 +1055,7 @@ int inotifytools_watch_files( char const * filenames[], int events ) {
  *       which match the regular expression passed to that function.  However,
  *       the @a timeout period begins again each time a matching event occurs.
  */
-struct inotify_event * inotifytools_next_event( int timeout ) {
+struct inotify_event * inotifytools_next_event( long int timeout ) {
 	return inotifytools_next_events( timeout, 1 );
 }
 
@@ -1049,8 +1067,8 @@ struct inotify_event * inotifytools_next_event( int timeout ) {
  * be used.
  *
  * @param timeout maximum amount of time, in seconds, to wait for an event.
- *                If @a timeout is 0, the function is non-blocking.  If
- *                @a timeout is negative, the function will block until an
+ *                If @a timeout is non-negative, the function is non-blocking.
+ *                If @a timeout is negative, the function will block until an
  *                event occurs.
  *
  * @param num_events approximate number of inotify events to wait for until
@@ -1081,17 +1099,16 @@ struct inotify_event * inotifytools_next_event( int timeout ) {
  *       occurrences) you must call this function with @a num_events = 1, or
  *       simply use inotifytools_next_event().
  *
- * @note Your program should call this function or
- *       inotifytools_next_events() frequently; between calls to this function,
- *       inotify events will be queued in the kernel, and eventually the queue
- *       will overflow and you will miss some events.
+ * @note Your program should call this function frequently; between calls to this
+ *       function, inotify events will be queued in the kernel, and eventually
+ *       the queue will overflow and you will miss some events.
  *
  * @note If the function inotifytools_ignore_events_by_regex() has been called
  *       with a non-NULL parameter, this function will not return on events
  *       which match the regular expression passed to that function.  However,
  *       the @a timeout period begins again each time a matching event occurs.
  */
-struct inotify_event * inotifytools_next_events( int timeout, int num_events ) {
+struct inotify_event * inotifytools_next_events( long int timeout, int num_events ) {
 	niceassert( init, "inotifytools_initialize not called yet" );
 	niceassert( num_events <= MAX_EVENTS, "too many events requested" );
 
@@ -1108,7 +1125,11 @@ struct inotify_event * inotifytools_next_events( int timeout, int num_events ) {
 	if (regex) {\
 		inotifytools_snprintf(match_name, MAX_STRLEN, A, "%w%f");\
 		if (0 == regexec(regex, match_name, 0, 0, 0)) {\
-			longjmp(jmp,0);\
+			if (!invert_regexp)\
+				longjmp(jmp,0);\
+		} else {\
+			if (invert_regexp)\
+				longjmp(jmp,0);\
 		}\
 	}\
 	if ( collect_stats ) {\
@@ -1167,7 +1188,7 @@ struct inotify_event * inotifytools_next_events( int timeout, int num_events ) {
 	read_timeout.tv_sec = timeout;
 	read_timeout.tv_usec = 0;
 	static struct timeval * read_timeout_ptr;
-	read_timeout_ptr = ( timeout <= 0 ? NULL : &read_timeout );
+	read_timeout_ptr = ( timeout < 0 ? NULL : &read_timeout );
 
 	FD_ZERO(&read_fds);
 	FD_SET(inotify_fd, &read_fds);
@@ -1446,7 +1467,7 @@ void record_stats( struct inotify_event const * event ) {
 
 }
 
-int *stat_ptr(watch *w, int event)
+unsigned int *stat_ptr(watch *w, int event)
 {
 	if ( IN_ACCESS == event )
 		return &w->hit_access;
@@ -1499,7 +1520,7 @@ int inotifytools_get_stat_by_wd( int wd, int event ) {
 
 	watch *w = watch_from_wd(wd);
 	if (!w) return -1;
-	int *i = stat_ptr(w, event);
+	unsigned int *i = stat_ptr(w, event);
 	if (!i) return -1;
 	return *i;
 }
@@ -1594,7 +1615,7 @@ int inotifytools_error() {
 /**
  * @internal
  */
-int isdir( char const * path ) {
+static int isdir( char const * path ) {
 	static struct stat64 my_stat;
 
 	if ( -1 == lstat64( path, &my_stat ) ) {
@@ -1992,14 +2013,16 @@ int inotifytools_get_max_user_watches() {
  * Ignore inotify events matching a particular regular expression.
  *
  * @a pattern is a regular expression and @a flags is a bitwise combination of
- * POSIX regular expression flags.
+ * POSIX regular expression flags. @a invert determines the type of filtering:
+ * 0 (--exclude[i]): exclude all files matching @a pattern
+ * 1 (--include[i]): exclude all files except those matching @a pattern
  *
  * On future calls to inotifytools_next_events() or inotifytools_next_event(),
  * the regular expression is executed on the filename of files on which
  * events occur.  If the regular expression matches, the matched event will be
  * ignored.
  */
-int inotifytools_ignore_events_by_regex( char const *pattern, int flags ) {
+static int do_ignore_events_by_regex( char const *pattern, int flags, int invert ) {
 	if (!pattern) {
 		if (regex) {
 			regfree(regex);
@@ -2012,6 +2035,7 @@ int inotifytools_ignore_events_by_regex( char const *pattern, int flags ) {
 	if (regex) { regfree(regex); }
 	else       { regex = (regex_t *)malloc(sizeof(regex_t)); }
 
+	invert_regexp = invert;
 	int ret = regcomp(regex, pattern, flags | REG_NOSUB);
 	if (0 == ret) return 1;
 
@@ -2022,11 +2046,41 @@ int inotifytools_ignore_events_by_regex( char const *pattern, int flags ) {
 	return 0;
 }
 
+/**
+ * Ignore inotify events matching a particular regular expression.
+ *
+ * @a pattern is a regular expression and @a flags is a bitwise combination of
+ * POSIX regular expression flags.
+ *
+ * On future calls to inotifytools_next_events() or inotifytools_next_event(),
+ * the regular expression is executed on the filename of files on which
+ * events occur.  If the regular expression matches, the matched event will be
+ * ignored.
+ */
+int inotifytools_ignore_events_by_regex( char const *pattern, int flags ) {
+	return do_ignore_events_by_regex(pattern, flags, 0);
+}
+
+/**
+ * Ignore inotify events NOT matching a particular regular expression.
+ *
+ * @a pattern is a regular expression and @a flags is a bitwise combination of
+ * POSIX regular expression flags.
+ *
+ * On future calls to inotifytools_next_events() or inotifytools_next_event(),
+ * the regular expression is executed on the filename of files on which
+ * events occur.  If the regular expression matches, the matched event will be
+ * ignored.
+ */
+int inotifytools_ignore_events_by_inverted_regex( char const *pattern, int flags ) {
+	return do_ignore_events_by_regex(pattern, flags, 1);
+}
+
 int event_compare(const void *p1, const void *p2, const void *config)
 {
 	if (!p1 || !p2) return p1 - p2;
 	char asc = 1;
-	int sort_event = (int)config;
+	long sort_event = (long)config;
 	if (sort_event == -1) {
 		sort_event = 0;
 		asc = 0;
@@ -2034,8 +2088,8 @@ int event_compare(const void *p1, const void *p2, const void *config)
 		sort_event = -sort_event;
 		asc = 0;
 	}
-	int *i1 = stat_ptr((watch*)p1, sort_event);
-	int *i2 = stat_ptr((watch*)p2, sort_event);
+	unsigned int *i1 = stat_ptr((watch*)p1, sort_event);
+	unsigned int *i2 = stat_ptr((watch*)p2, sort_event);
 	if (0 == *i1 - *i2) {
 		return ((watch*)p1)->wd - ((watch*)p2)->wd;
 	}
@@ -2047,7 +2101,7 @@ int event_compare(const void *p1, const void *p2, const void *config)
 
 struct rbtree *inotifytools_wd_sorted_by_event(int sort_event)
 {
-	struct rbtree *ret = rbinit(event_compare, (void*)sort_event);
+	struct rbtree *ret = rbinit(event_compare, (void*)(uintptr_t)sort_event);
 	RBLIST *all = rbopenlist(tree_wd);
 	void const *p = rbreadlist(all);
 	while (p) {

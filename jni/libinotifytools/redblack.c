@@ -1,5 +1,3 @@
-static char rcsid[]="$Id: redblack.c,v 1.9 2003/10/24 01:31:21 damo Exp $";
-
 /*
    Redblack balanced tree algorithm
    Copyright (C) Damian Ivereigh 2000
@@ -140,9 +138,6 @@ RB_STATIC struct RB_ENTRY(tree) *RB_ENTRY(init)(void)
 #endif /* RB_CUSTOMIZE */
 {
 	struct RB_ENTRY(tree) *retval;
-	char c;
-
-	c=rcsid[0]; /* This does nothing but shutup the -Wall */
 
 	if ((retval=(struct RB_ENTRY(tree) *) malloc(sizeof(struct RB_ENTRY(tree))))==NULL)
 		return(NULL);
@@ -361,7 +356,7 @@ RB_ENTRY(_traverse)(int insert, const RB_ENTRY(data_t) *key, struct RB_ENTRY(tre
 	x=z;
 
 	/* While we are not at the top and our parent node is red
-	** N.B. Since the root node is garanteed black, then we
+	** N.B. Since the root node is guaranteed black, then we
 	** are also going to stop if we are the child of the root
 	*/
 
@@ -445,7 +440,7 @@ static struct RB_ENTRY(node) *
 RB_ENTRY(_lookup)(int mode, const RB_ENTRY(data_t) *key, struct RB_ENTRY(tree) *rbinfo)
 {
 	struct RB_ENTRY(node) *x,*y;
-	int cmp;
+	int cmp=0;
 	int found=0;
 
 	y=RBNULL; /* points to the parent of x */

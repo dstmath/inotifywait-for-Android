@@ -13,6 +13,11 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#ifdef __FreeBSD__
+#define stat64 stat
+#define lstat64 lstat
+#endif
+
 /*
  * struct inotify_event - structure read from the inotify device for each event
  *
@@ -24,7 +29,7 @@ struct inotify_event {
 	uint32_t		mask;		/* watch mask */
 	uint32_t		cookie;		/* cookie to synchronize two events */
 	uint32_t		len;		/* length (including nulls) of name */
-	char		name __flexarr;	/* stub for possible name */
+	char		name[];	/* stub for possible name */
 };
 
 /* the following are legal, implemented events that user-space can watch for */
@@ -100,8 +105,8 @@ struct inotify_event {
 # endif
 # if _MIPS_SIM == _MIPS_SIM_ABI64
 #  define __NR_inotify_init (__NR_Linux + 243)
-#  define __NR_inotify_add_watch (__NR_Linux + 243)
-#  define __NR_inotify_rm_watch (__NR_Linux + 243)
+#  define __NR_inotify_add_watch (__NR_Linux + 244)
+#  define __NR_inotify_rm_watch (__NR_Linux + 245)
 # endif
 # if _MIPS_SIM == _MIPS_SIM_NABI32
 #  define __NR_inotify_init (__NR_Linux + 247)
